@@ -26,6 +26,11 @@ THEMES = {
         "input_fg": "#f8fafc",
         "btn_bg": "#334155",
         "btn_active": "#475569",
+        "accent_bg": "#2563eb",
+        "accent_active": "#1d4ed8",
+        "accent_fg": "#ffffff",
+        "danger_bg": "#dc2626",
+        "danger_active": "#b91c1c",
         "select_bg": "#3b82f6",
         "border": "#3f3f56",
         "tab_bg": "#262637",
@@ -39,6 +44,11 @@ THEMES = {
         "input_fg": "#0f172a",
         "btn_bg": "#cbd5e1",
         "btn_active": "#94a3b8",
+        "accent_bg": "#2563eb",
+        "accent_active": "#1d4ed8",
+        "accent_fg": "#ffffff",
+        "danger_bg": "#dc2626",
+        "danger_active": "#b91c1c",
         "select_bg": "#2563eb",
         "border": "#cbd5e1",
         "tab_bg": "#e2e8f0",
@@ -67,12 +77,68 @@ def _select_all_text(event: tk.Event) -> str:
     return "break"
 
 
+class _Tooltip:
+    """Tooltip ligero con retardo y limite de apariciones por sesion."""
+
+    def __init__(self, widget: tk.Widget, text: str, max_shows: int = 3, delay_ms: int = 400) -> None:
+        self.widget = widget
+        self.text = text
+        self.max_shows = max_shows
+        self.delay_ms = delay_ms
+        self.shown_count = 0
+        self.after_id: str | None = None
+        self.tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event: tk.Event) -> None:
+        if self.shown_count >= self.max_shows or not self.text:
+            return
+        self._cancel_timer()
+        self.after_id = self.widget.after(self.delay_ms, self._show)
+
+    def _cancel_timer(self) -> None:
+        if self.after_id is not None:
+            self.widget.after_cancel(self.after_id)
+            self.after_id = None
+
+    def _show(self) -> None:
+        self.after_id = None
+        if self.tip is not None or self.shown_count >= self.max_shows or not self.text:
+            return
+        self.shown_count += 1
+        x = self.widget.winfo_rootx() + 14
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.wm_geometry(f"+{x}+{y}")
+        lbl = tk.Label(
+            self.tip,
+            text=self.text,
+            background="#0f172a",
+            foreground="#f8fafc",
+            relief=tk.SOLID,
+            borderwidth=1,
+            padx=8,
+            pady=4,
+            justify=tk.LEFT,
+        )
+        lbl.pack()
+
+    def _hide(self, _event: tk.Event | None = None) -> None:
+        self._cancel_timer()
+        if self.tip is not None:
+            self.tip.destroy()
+            self.tip = None
+
+
 class GalleryDLGui:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Gallery-DL GUI")
-        self.root.geometry("880x680")
-        self.root.minsize(820, 600)
+        self.root.geometry("880x720")
+        self.root.minsize(820, 620)
 
         self.process: subprocess.Popen | None = None
         self.processed_count = 0
@@ -188,6 +254,7 @@ class GalleryDLGui:
         self.url_var = tk.StringVar()
         self.url_entry = ttk.Entry(src_frame, textvariable=self.url_var)
         self.url_entry.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        self.url_entry.bind("<Return>", lambda _e: self._start())
         ttk.Button(src_frame, text="Pegar", command=self._paste_url).grid(
             row=1, column=2, padx=(6, 0), pady=(6, 0)
         )
@@ -220,10 +287,16 @@ class GalleryDLGui:
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=tk.X, **pad)
 
-        self.run_btn = ttk.Button(btn_frame, text="Ejecutar", command=self._start)
+        self.run_btn = ttk.Button(btn_frame, text="Ejecutar", command=self._start, style="Accent.TButton")
         self.run_btn.pack(side=tk.LEFT)
 
-        self.stop_btn = ttk.Button(btn_frame, text="Detener", command=self._stop, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(
+            btn_frame,
+            text="Detener",
+            command=self._stop,
+            state=tk.DISABLED,
+            style="Danger.TButton",
+        )
         self.stop_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         ttk.Button(btn_frame, text="Copiar comando", command=self._copy_command).pack(
@@ -267,12 +340,16 @@ class GalleryDLGui:
         self.dir_mode = tk.StringVar(value=self.prefs.get("dir_mode", "-d"))
         dir_opts = ttk.Frame(dst_frame)
         dir_opts.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(6, 0))
-        ttk.Radiobutton(
+        rb_d = ttk.Radiobutton(
             dir_opts, text="Crear subcarpetas por sitio/autor (-d)", variable=self.dir_mode, value="-d"
-        ).pack(side=tk.LEFT)
-        ttk.Radiobutton(
+        )
+        rb_d.pack(side=tk.LEFT)
+        _Tooltip(rb_d, "Organiza automáticamente en subcarpetas según el sitio y autor.")
+        rb_big_d = ttk.Radiobutton(
             dir_opts, text="Guardar directo en esta carpeta (-D)", variable=self.dir_mode, value="-D"
-        ).pack(side=tk.LEFT, padx=(18, 0))
+        )
+        rb_big_d.pack(side=tk.LEFT, padx=(18, 0))
+        _Tooltip(rb_big_d, "Guarda todos los archivos sueltos directamente en la carpeta elegida.")
         dst_frame.columnconfigure(0, weight=1)
 
         # --- Opciones frecuentes ---
@@ -281,39 +358,46 @@ class GalleryDLGui:
 
         ttk.Label(opt_frame, text="Rango (--range):").grid(row=0, column=0, sticky=tk.W)
         self.range_var = tk.StringVar()
-        ttk.Entry(opt_frame, textvariable=self.range_var, width=12).grid(
-            row=0, column=1, sticky=tk.W, padx=(4, 12)
-        )
+        range_entry = ttk.Entry(opt_frame, textvariable=self.range_var, width=12)
+        range_entry.grid(row=0, column=1, sticky=tk.W, padx=(4, 12))
+        _Tooltip(range_entry, "Limita cuántas imágenes bajar (ej. 1-10 o 15-30).")
 
         ttk.Label(opt_frame, text="Pausa (--sleep):").grid(row=0, column=2, sticky=tk.W)
         self.sleep_var = tk.StringVar(value=self.prefs.get("sleep", "1-2"))
-        ttk.Entry(opt_frame, textvariable=self.sleep_var, width=8).grid(
-            row=0, column=3, sticky=tk.W, padx=(4, 12)
-        )
+        sleep_entry = ttk.Entry(opt_frame, textvariable=self.sleep_var, width=8)
+        sleep_entry.grid(row=0, column=3, sticky=tk.W, padx=(4, 12))
+        _Tooltip(sleep_entry, "Segundos de espera entre descargas (ej. 1-2) para evitar bloqueos.")
 
         ttk.Label(opt_frame, text="Tamaño mín:").grid(row=0, column=4, sticky=tk.W)
         self.min_size_var = tk.StringVar(value=self.prefs.get("min_size", ""))
-        ttk.Entry(opt_frame, textvariable=self.min_size_var, width=8).grid(
-            row=0, column=5, sticky=tk.W, padx=(4, 4)
-        )
+        min_entry = ttk.Entry(opt_frame, textvariable=self.min_size_var, width=8)
+        min_entry.grid(row=0, column=5, sticky=tk.W, padx=(4, 4))
+        _Tooltip(min_entry, "Ignora archivos más pequeños que este tamaño (ej. 50k o 1M).")
         ttk.Label(opt_frame, text="ej. 50k").grid(row=0, column=6, sticky=tk.W)
 
         ttk.Label(opt_frame, text="Cookies navegador:").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        self.browser_var = tk.StringVar(value=self.prefs.get("browser", "ninguno"))
-        ttk.Combobox(
+        saved_browser = self.prefs.get("browser", "Ninguno")
+        if saved_browser.lower() == "ninguno":
+            saved_browser = "Ninguno"
+        self.browser_var = tk.StringVar(value=saved_browser)
+        browser_cb = ttk.Combobox(
             opt_frame,
             textvariable=self.browser_var,
-            values=["ninguno", "firefox", "chromium", "chrome", "brave", "edge"],
+            values=["Ninguno", "firefox", "chromium", "chrome", "brave", "edge"],
             state="readonly",
             width=11,
-        ).grid(row=1, column=1, sticky=tk.W, padx=(4, 12), pady=(6, 0))
+        )
+        browser_cb.grid(row=1, column=1, sticky=tk.W, padx=(4, 12), pady=(6, 0))
+        _Tooltip(browser_cb, "Usa la sesión de tu navegador para sitios que piden login.")
 
         self.archive_var = tk.BooleanVar(value=self.prefs.get("archive", True))
-        ttk.Checkbutton(
+        archive_chk = ttk.Checkbutton(
             opt_frame,
             text="Evitar duplicados (--download-archive)",
             variable=self.archive_var,
-        ).grid(row=1, column=2, columnspan=5, sticky=tk.W, pady=(6, 0))
+        )
+        archive_chk.grid(row=1, column=2, columnspan=5, sticky=tk.W, pady=(6, 0))
+        _Tooltip(archive_chk, "Guarda un historial para no volver a descargar lo que ya bajaste.")
 
         ttk.Label(opt_frame, text="Tipo de archivo:").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
         legacy_ft = {
@@ -324,141 +408,140 @@ class GalleryDLGui:
         if saved_ft not in FILETYPE_FILTERS:
             saved_ft = "Todos"
         self.filetype_var = tk.StringVar(value=saved_ft)
-        ttk.Combobox(
+        ft_cb = ttk.Combobox(
             opt_frame,
             textvariable=self.filetype_var,
             values=list(FILETYPE_FILTERS.keys()),
             state="readonly",
             width=36,
-        ).grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=(4, 12), pady=(6, 0))
+        )
+        ft_cb.grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=(4, 12), pady=(6, 0))
+        _Tooltip(ft_cb, "Filtra para bajar solo fotos, fotos sin GIF o solo videos.")
 
         ttk.Label(opt_frame, text="Álbumes (--child-range):").grid(row=2, column=4, sticky=tk.W, pady=(6, 0))
         self.child_range_var = tk.StringVar()
-        ttk.Entry(opt_frame, textvariable=self.child_range_var, width=8).grid(
-            row=2, column=5, sticky=tk.W, padx=(4, 4), pady=(6, 0)
-        )
+        child_entry = ttk.Entry(opt_frame, textvariable=self.child_range_var, width=8)
+        child_entry.grid(row=2, column=5, sticky=tk.W, padx=(4, 4), pady=(6, 0))
+        _Tooltip(child_entry, "En categorías o búsquedas, limita cuántos álbumes descargar (ej. 1-5).")
         ttk.Label(opt_frame, text="ej. 1-5").grid(row=2, column=6, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(opt_frame, text="Modo:").grid(row=3, column=0, sticky=tk.W, pady=(6, 0))
         self.run_mode = tk.StringVar(value="download")
         mode_box = ttk.Frame(opt_frame)
         mode_box.grid(row=3, column=1, columnspan=6, sticky=tk.W, pady=(6, 0))
-        ttk.Radiobutton(mode_box, text="Descargar", variable=self.run_mode, value="download").pack(side=tk.LEFT)
-        ttk.Radiobutton(mode_box, text="Simular (-s)", variable=self.run_mode, value="simulate").pack(
-            side=tk.LEFT, padx=(8, 0)
-        )
-        ttk.Radiobutton(mode_box, text="URLs (-g)", variable=self.run_mode, value="urls").pack(
-            side=tk.LEFT, padx=(8, 0)
-        )
-        ttk.Radiobutton(mode_box, text="JSON (-j)", variable=self.run_mode, value="json").pack(
-            side=tk.LEFT, padx=(8, 0)
-        )
-        ttk.Radiobutton(mode_box, text="Variables (-K)", variable=self.run_mode, value="keywords").pack(
-            side=tk.LEFT, padx=(8, 0)
-        )
-        self.verbose_var = tk.BooleanVar(value=self.prefs.get("verbose", True))
-        ttk.Checkbutton(
-            mode_box,
-            text="Detallado (-v)",
-            variable=self.verbose_var,
-        ).pack(side=tk.LEFT, padx=(12, 0))
+        rb_dl = ttk.Radiobutton(mode_box, text="Descargar", variable=self.run_mode, value="download")
+        rb_dl.pack(side=tk.LEFT)
+        _Tooltip(rb_dl, "Descarga los archivos en la carpeta de destino.")
+        rb_sim = ttk.Radiobutton(mode_box, text="Simular (-s)", variable=self.run_mode, value="simulate")
+        rb_sim.pack(side=tk.LEFT, padx=(10, 0))
+        _Tooltip(rb_sim, "Prueba qué detecta la página sin descargar ningún archivo.")
+        rb_urls = ttk.Radiobutton(mode_box, text="Solo URLs (-g)", variable=self.run_mode, value="urls")
+        rb_urls.pack(side=tk.LEFT, padx=(10, 0))
+        _Tooltip(rb_urls, "Muestra solo los enlaces directos de las imágenes sin descargar.")
 
     def _build_advanced_tab(self, parent: ttk.Frame, pad: dict) -> None:
-        adv_frame = ttk.LabelFrame(parent, text="Control de red, límites y metadatos", padding=10)
-        adv_frame.pack(fill=tk.X, **pad)
+        adv_frame = ttk.LabelFrame(parent, text="Control de red, límites y metadatos", padding=8)
+        adv_frame.pack(fill=tk.X, padx=8, pady=2)
 
         ttk.Label(adv_frame, text="Tamaño máx (--filesize-max):").grid(row=0, column=0, sticky=tk.W)
         self.max_size_var = tk.StringVar(value=self.prefs.get("max_size", ""))
-        ttk.Entry(adv_frame, textvariable=self.max_size_var, width=12).grid(
-            row=0, column=1, sticky=tk.W, padx=(6, 16)
-        )
+        e_max = ttk.Entry(adv_frame, textvariable=self.max_size_var, width=12)
+        e_max.grid(row=0, column=1, sticky=tk.W, padx=(6, 16))
+        _Tooltip(e_max, "No descarga archivos más pesados que este límite (ej. 20M).")
         ttk.Label(adv_frame, text="ej. 20M").grid(row=0, column=2, sticky=tk.W, padx=(0, 16))
 
         ttk.Label(adv_frame, text="Límite velocidad (-r):").grid(row=0, column=3, sticky=tk.W)
         self.rate_var = tk.StringVar(value=self.prefs.get("limit_rate", ""))
-        ttk.Entry(adv_frame, textvariable=self.rate_var, width=12).grid(
-            row=0, column=4, sticky=tk.W, padx=(6, 8)
-        )
+        e_rate = ttk.Entry(adv_frame, textvariable=self.rate_var, width=12)
+        e_rate.grid(row=0, column=4, sticky=tk.W, padx=(6, 8))
+        _Tooltip(e_rate, "Limita la velocidad de red para no saturar tu conexión (ej. 2M o 500k).")
         ttk.Label(adv_frame, text="ej. 2M o 500k").grid(row=0, column=5, sticky=tk.W)
 
-        ttk.Label(adv_frame, text="Reintentos (-R):").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Reintentos (-R):").grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
         self.retries_var = tk.StringVar(value=self.prefs.get("retries", ""))
-        ttk.Entry(adv_frame, textvariable=self.retries_var, width=12).grid(
-            row=1, column=1, sticky=tk.W, padx=(6, 16), pady=(8, 0)
-        )
+        e_ret = ttk.Entry(adv_frame, textvariable=self.retries_var, width=12)
+        e_ret.grid(row=1, column=1, sticky=tk.W, padx=(6, 16), pady=(5, 0))
+        _Tooltip(e_ret, "Cuántas veces reintenta si falla la conexión HTTP (ej. 5).")
 
-        ttk.Label(adv_frame, text="Rango posts (--post-range):").grid(row=1, column=3, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Rango posts (--post-range):").grid(row=1, column=3, sticky=tk.W, pady=(5, 0))
         self.post_range_var = tk.StringVar()
-        ttk.Entry(adv_frame, textvariable=self.post_range_var, width=12).grid(
-            row=1, column=4, sticky=tk.W, padx=(6, 8), pady=(8, 0)
-        )
-        ttk.Label(adv_frame, text="ej. 1-10").grid(row=1, column=5, sticky=tk.W, pady=(8, 0))
+        e_prng = ttk.Entry(adv_frame, textvariable=self.post_range_var, width=12)
+        e_prng.grid(row=1, column=4, sticky=tk.W, padx=(6, 8), pady=(5, 0))
+        _Tooltip(e_prng, "En redes sociales, limita por cantidad de publicaciones (ej. 1-10).")
+        ttk.Label(adv_frame, text="ej. 1-10").grid(row=1, column=5, sticky=tk.W, pady=(5, 0))
 
         self.metadata_var = tk.BooleanVar(value=self.prefs.get("metadata", False))
-        ttk.Checkbutton(
+        c_meta = ttk.Checkbutton(
             adv_frame,
             text="Guardar metadatos en JSON (--write-metadata)",
             variable=self.metadata_var,
-        ).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(8, 0))
+        )
+        c_meta.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(5, 0))
+        _Tooltip(c_meta, "Guarda un archivo .json junto a cada descarga con autor, fecha y tags.")
 
         self.no_skip_var = tk.BooleanVar(value=self.prefs.get("no_skip", False))
-        ttk.Checkbutton(
+        c_noskip = ttk.Checkbutton(
             adv_frame,
             text="Sobrescribir existentes (--no-skip)",
             variable=self.no_skip_var,
-        ).grid(row=2, column=3, columnspan=3, sticky=tk.W, pady=(8, 0))
+        )
+        c_noskip.grid(row=2, column=3, columnspan=3, sticky=tk.W, pady=(5, 0))
+        _Tooltip(c_noskip, "Vuelve a descargar archivos aunque ya existan en la carpeta.")
 
-        ttk.Label(adv_frame, text="Proxy (--proxy):").grid(row=3, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Proxy (--proxy):").grid(row=3, column=0, sticky=tk.W, pady=(5, 0))
         self.proxy_var = tk.StringVar(value=self.prefs.get("proxy", ""))
-        ttk.Entry(adv_frame, textvariable=self.proxy_var, width=24).grid(
-            row=3, column=1, columnspan=2, sticky=tk.W, padx=(6, 16), pady=(8, 0)
-        )
+        e_proxy = ttk.Entry(adv_frame, textvariable=self.proxy_var, width=24)
+        e_proxy.grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=(6, 16), pady=(5, 0))
+        _Tooltip(e_proxy, "Enruta descargas por proxy HTTP o SOCKS5/Tor (ej. socks5://127.0.0.1:9050).")
 
-        ttk.Label(adv_frame, text="Desde fecha (--date-after):").grid(row=3, column=3, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Desde fecha (--date-after):").grid(row=3, column=3, sticky=tk.W, pady=(5, 0))
         self.date_after_var = tk.StringVar(value=self.prefs.get("date_after", ""))
-        ttk.Entry(adv_frame, textvariable=self.date_after_var, width=12).grid(
-            row=3, column=4, sticky=tk.W, padx=(6, 8), pady=(8, 0)
-        )
-        ttk.Label(adv_frame, text="YYYY-MM-DD").grid(row=3, column=5, sticky=tk.W, pady=(8, 0))
+        e_date = ttk.Entry(adv_frame, textvariable=self.date_after_var, width=12)
+        e_date.grid(row=3, column=4, sticky=tk.W, padx=(6, 8), pady=(5, 0))
+        _Tooltip(e_date, "Descarga solo publicaciones posteriores a esta fecha (AÑO-MES-DÍA).")
+        ttk.Label(adv_frame, text="YYYY-MM-DD").grid(row=3, column=5, sticky=tk.W, pady=(5, 0))
 
-        ttk.Label(adv_frame, text="Parar tras N omitidos (-A):").grid(row=4, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Parar tras N omitidos (-A):").grid(row=4, column=0, sticky=tk.W, pady=(5, 0))
         self.abort_var = tk.StringVar(value=self.prefs.get("abort_count", ""))
-        ttk.Entry(adv_frame, textvariable=self.abort_var, width=12).grid(
-            row=4, column=1, sticky=tk.W, padx=(6, 16), pady=(8, 0)
-        )
+        e_abort = ttk.Entry(adv_frame, textvariable=self.abort_var, width=12)
+        e_abort.grid(row=4, column=1, sticky=tk.W, padx=(6, 16), pady=(5, 0))
+        _Tooltip(e_abort, "Se detiene tras N archivos repetidos seguidos (ideal para actualizar perfiles).")
 
-        ttk.Label(adv_frame, text="Formato nombre (-f):").grid(row=4, column=3, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Formato nombre (-f):").grid(row=4, column=3, sticky=tk.W, pady=(5, 0))
         self.filename_var = tk.StringVar(value=self.prefs.get("filename_fmt", ""))
-        ttk.Entry(adv_frame, textvariable=self.filename_var, width=22).grid(
-            row=4, column=4, columnspan=2, sticky=tk.W, padx=(6, 0), pady=(8, 0)
-        )
+        e_fmt = ttk.Entry(adv_frame, textvariable=self.filename_var, width=22)
+        e_fmt.grid(row=4, column=4, columnspan=2, sticky=tk.W, padx=(6, 0), pady=(5, 0))
+        _Tooltip(e_fmt, "Plantilla de nombre al guardar (ej. {num:>03}_{filename}.{extension}).")
 
-        ttk.Label(adv_frame, text="Espera 429 (--sleep-429):").grid(row=5, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(adv_frame, text="Espera 429 (--sleep-429):").grid(row=5, column=0, sticky=tk.W, pady=(5, 0))
         self.sleep_429_var = tk.StringVar(value=self.prefs.get("sleep_429", ""))
-        ttk.Entry(adv_frame, textvariable=self.sleep_429_var, width=12).grid(
-            row=5, column=1, sticky=tk.W, padx=(6, 16), pady=(8, 0)
-        )
-        ttk.Label(adv_frame, text="seg").grid(row=5, column=2, sticky=tk.W, pady=(8, 0))
+        e_429 = ttk.Entry(adv_frame, textvariable=self.sleep_429_var, width=12)
+        e_429.grid(row=5, column=1, sticky=tk.W, padx=(6, 16), pady=(5, 0))
+        _Tooltip(e_429, "Segundos de espera automática si el servidor devuelve error 429.")
+        ttk.Label(adv_frame, text="seg").grid(row=5, column=2, sticky=tk.W, pady=(5, 0))
 
         self.write_pages_var = tk.BooleanVar(value=self.prefs.get("write_pages", False))
-        ttk.Checkbutton(
+        c_wpages = ttk.Checkbutton(
             adv_frame,
             text="Guardar páginas debug (--write-pages)",
             variable=self.write_pages_var,
-        ).grid(row=5, column=3, columnspan=3, sticky=tk.W, pady=(8, 0))
-
-        # --- Mantenimiento ---
-        maint_frame = ttk.LabelFrame(parent, text="Mantenimiento de gallery-dl", padding=10)
-        maint_frame.pack(fill=tk.X, **pad)
-
-        ttk.Button(maint_frame, text="Comprobar versión", command=self._check_version).pack(side=tk.LEFT)
-        ttk.Button(maint_frame, text="Actualizar gallery-dl", command=self._update_gallery_dl).pack(
-            side=tk.LEFT, padx=(8, 0)
         )
-        ttk.Label(
-            maint_frame,
-            text="Solo actualiza instalaciones de usuario (pip/pipx); no modifica configuraciones globales.",
-        ).pack(side=tk.LEFT, padx=(12, 0))
+        c_wpages.grid(row=5, column=3, columnspan=3, sticky=tk.W, pady=(5, 0))
+        _Tooltip(c_wpages, "Guarda el HTML/JSON intermedio para depurar extractores que fallen.")
+
+        ttk.Label(adv_frame, text="Modo técnico:").grid(row=6, column=0, sticky=tk.W, pady=(5, 0))
+        tech_box = ttk.Frame(adv_frame)
+        tech_box.grid(row=6, column=1, columnspan=5, sticky=tk.W, padx=(6, 0), pady=(5, 0))
+        rb_json = ttk.Radiobutton(tech_box, text="JSON (-j)", variable=self.run_mode, value="json")
+        rb_json.pack(side=tk.LEFT)
+        _Tooltip(rb_json, "Muestra toda la información extraída en formato JSON sin descargar.")
+        rb_kw = ttk.Radiobutton(tech_box, text="Variables (-K)", variable=self.run_mode, value="keywords")
+        rb_kw.pack(side=tk.LEFT, padx=(10, 0))
+        _Tooltip(rb_kw, "Lista las variables disponibles del sitio para usar en '-f'.")
+        self.verbose_var = tk.BooleanVar(value=self.prefs.get("verbose", True))
+        c_verb = ttk.Checkbutton(tech_box, text="Detallado (-v)", variable=self.verbose_var)
+        c_verb.pack(side=tk.LEFT, padx=(14, 0))
+        _Tooltip(c_verb, "Muestra el detalle técnico paso a paso en la salida en vivo.")
 
     def _build_help_tab(self, parent: ttk.Frame, pad: dict) -> None:
         help_text = (
@@ -518,26 +601,26 @@ class GalleryDLGui:
             "  ir más despacio. Pon '30' para que espere 30 segundos y siga solo.\n"
             "• Guardar páginas debug (--write-pages): Solo para programadores/depuración.\n"
         )
-        self.help_box = scrolledtext.ScrolledText(parent, wrap=tk.WORD, height=16)
+        self.help_box = scrolledtext.ScrolledText(parent, wrap=tk.WORD, height=9)
         self.help_box.pack(fill=tk.BOTH, expand=True, **pad)
         self.help_box.insert("1.0", help_text)
         self.help_box.configure(state=tk.DISABLED)
 
     def _build_credits_tab(self, parent: ttk.Frame, pad: dict) -> None:
-        wrapper = ttk.Frame(parent, padding=16)
+        wrapper = ttk.Frame(parent, padding=8)
         wrapper.pack(fill=tk.BOTH, expand=True)
 
-        card = ttk.LabelFrame(wrapper, text="Acerca del proyecto", padding=20)
+        card = ttk.LabelFrame(wrapper, text="Acerca del proyecto y mantenimiento", padding=12)
         card.pack(expand=True, fill=tk.BOTH)
 
-        ttk.Label(card, text="Gallery-DL GUI", font=("TkDefaultFont", 15, "bold")).pack(pady=(4, 2))
+        ttk.Label(card, text="Gallery-DL GUI", font=("TkDefaultFont", 14, "bold")).pack(pady=(2, 2))
         ttk.Label(
             card,
             text="Interfaz gráfica ultraligera para Linux sin dependencias externas",
             font=("TkDefaultFont", 10, "italic"),
-        ).pack(pady=(0, 12))
+        ).pack(pady=(0, 8))
 
-        ttk.Separator(card, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 14))
+        ttk.Separator(card, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
 
         info = ttk.Frame(card)
         info.pack()
@@ -550,18 +633,27 @@ class GalleryDLGui:
         ]
         for idx, (label, value) in enumerate(rows):
             ttk.Label(info, text=label, font=("TkDefaultFont", 10, "bold")).grid(
-                row=idx, column=0, sticky=tk.E, padx=(0, 12), pady=3
+                row=idx, column=0, sticky=tk.E, padx=(0, 12), pady=2
             )
-            ttk.Label(info, text=value).grid(row=idx, column=1, sticky=tk.W, pady=3)
+            ttk.Label(info, text=value).grid(row=idx, column=1, sticky=tk.W, pady=2)
+
+        actions = ttk.Frame(card)
+        actions.pack(pady=(12, 2))
 
         ttk.Button(
-            card,
+            actions,
             text="Copiar enlace de GitHub",
             command=lambda: self._copy_text(
                 "https://github.com/KennyWaddell/gallery-dl-gui",
                 "Enlace de GitHub copiado al portapapeles",
             ),
-        ).pack(pady=(16, 4))
+        ).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Comprobar versión", command=self._check_version).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        btn_upd = ttk.Button(actions, text="Actualizar gallery-dl", command=self._update_gallery_dl)
+        btn_upd.pack(side=tk.LEFT, padx=(8, 0))
+        _Tooltip(btn_upd, "Solo actualiza instalaciones de usuario (pip/pipx); no toca paquetes del sistema.")
 
     def _apply_theme(self, name: str) -> None:
         self.theme_name = name if name in THEMES else "dark"
@@ -596,6 +688,30 @@ class GalleryDLGui:
         self.style.map(
             "TButton",
             background=[("active", t["btn_active"]), ("disabled", t["panel"])],
+        )
+        self.style.configure(
+            "Accent.TButton",
+            background=t["accent_bg"],
+            foreground=t["accent_fg"],
+            font=("TkDefaultFont", 10, "bold"),
+            padding=(12, 5),
+        )
+        self.style.map(
+            "Accent.TButton",
+            background=[("active", t["accent_active"]), ("disabled", t["panel"])],
+            foreground=[("disabled", t["fg"])],
+        )
+        self.style.configure(
+            "Danger.TButton",
+            background=t["danger_bg"],
+            foreground=t["accent_fg"],
+            font=("TkDefaultFont", 10, "bold"),
+            padding=(10, 5),
+        )
+        self.style.map(
+            "Danger.TButton",
+            background=[("active", t["danger_active"]), ("disabled", t["panel"])],
+            foreground=[("disabled", t["fg"])],
         )
         self.style.configure(
             "TEntry",
@@ -704,7 +820,7 @@ class GalleryDLGui:
                 cmd.extend([flag, cleaned])
 
         browser = self.browser_var.get()
-        if browser and browser != "ninguno":
+        if browser and browser.lower() != "ninguno":
             cmd.extend(["--cookies-from-browser", browser])
 
         if self.archive_var.get():
@@ -761,7 +877,20 @@ class GalleryDLGui:
         cmd = self._build_command()
         if cmd is None:
             return
-        self._launch_process(cmd, label="Ejecutando...", count_items=True)
+        count_items = self.run_mode.get() in ("download", "simulate", "urls")
+        self._launch_process(cmd, label="Ejecutando...", count_items=count_items)
+
+    @staticmethod
+    def _is_item_line(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        if stripped.startswith(("[", "{", "}", '"', "DEBUG:", "INFO:", "WARNING:", "ERROR:")):
+            return False
+        if stripped.startswith("#"):
+            # En simulacion (-s), las rutas simuladas suelen empezar con "# /" o "# ~"
+            return stripped.startswith(("# /", "# ~", "# http"))
+        return True
 
     def _launch_process(
         self,
@@ -805,11 +934,9 @@ class GalleryDLGui:
             with proc.stdout:
                 for line in proc.stdout:
                     self.root.after(0, self._append_log, line)
-                    if count_items:
-                        stripped = line.strip()
-                        if stripped and not stripped.startswith("[") and not stripped.startswith("#"):
-                            self.processed_count += 1
-                            self.root.after(0, self.count_var.set, f"Elementos: {self.processed_count}")
+                    if count_items and self._is_item_line(line):
+                        self.processed_count += 1
+                        self.root.after(0, self.count_var.set, f"Elementos: {self.processed_count}")
             code = proc.wait()
             self.root.after(0, self._append_log, f"\n[Finalizado con codigo {code}]\n\n")
             self.root.after(0, self.status_var.set, f"Estado: Listo (codigo {code})")
@@ -824,9 +951,33 @@ class GalleryDLGui:
         self.run_btn.configure(state=tk.NORMAL)
         self.stop_btn.configure(state=tk.DISABLED)
 
+    def _terminate_process(self, proc: subprocess.Popen, force_wait: bool = False) -> None:
+        try:
+            proc.terminate()
+        except OSError:
+            return
+
+        if force_wait:
+            try:
+                proc.wait(timeout=1.5)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        else:
+            def _force_kill() -> None:
+                if proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+
+            threading.Timer(2.0, _force_kill).start()
+
     def _stop(self) -> None:
         if self.process is not None:
-            self.process.terminate()
+            self._terminate_process(self.process, force_wait=False)
             self._append_log("\n[Deteniendo proceso...]\n")
             self.status_var.set("Estado: Detenido")
 
@@ -863,10 +1014,7 @@ class GalleryDLGui:
 
     def _on_close(self) -> None:
         if self.process is not None:
-            try:
-                self.process.terminate()
-            except OSError:
-                pass
+            self._terminate_process(self.process, force_wait=True)
         self._save_prefs()
         self.root.destroy()
 
